@@ -1,0 +1,383 @@
+---
+import FormFields from '../components/FormFields';
+import FileUploader from '../components/FileUploader';
+import '../styles/global.css';
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fresh Wax - Upload Portal</title>
+</head>
+<body class="antialiased">
+  <div class="max-w-3xl mx-auto px-6 py-12">
+    
+    <!-- Header with Logo -->
+    <div class="text-center mb-16">
+      <div class="mb-8">
+        <img 
+          src="/logo.webp" 
+          alt="FreshWax Logo" 
+          class="h-21 mx-auto mb-6"
+        />
+      </div>
+      <h1 class="text-3xl text-gray-900 font-semibold mb-3">
+        Upload Portal
+      </h1>
+      <p class="text-gray-600">
+        Submit your Jungle & Drum and Bass releases
+      </p>
+    </div>
+
+    <!-- Main Form -->
+    <div class="bg-white border border-gray-200 rounded-lg p-8 shadow-sm mb-8">
+      <form id="uploadForm" class="space-y-8">
+        
+        <FormFields client:load />
+
+        <!-- File Upload Section -->
+        <div class="border-t border-gray-200 pt-8">
+          <h2 class="text-lg text-gray-900 font-semibold mb-6">
+            Upload Files
+          </h2>
+          <FileUploader client:load />
+        </div>
+
+        <!-- Submit Button -->
+        <button
+          type="submit"
+          id="submitBtn"
+          class="w-full py-4 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+        >
+          Submit Release
+        </button>
+
+        <!-- Status Message -->
+        <div id="statusMessage" class="hidden"></div>
+      </form>
+    </div>
+
+    <!-- Info Section -->
+    <div class="space-y-4">
+      <div class="bg-blue-50 border border-blue-100 rounded-lg p-6">
+        <p class="text-gray-700 text-sm">
+          <span class="font-semibold text-gray-900">Accepted Formats:</span> MP3 (320kbps), WAV (44.1kHz/16-bit or higher), JPG and PNG. 200mb max per file.
+        </p>
+      </div>
+      
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-6">
+        <p class="text-gray-700 text-sm">
+          All of the uploaded files will be reviewed before being added to the store. You will be contacted by email if there are any issues with the uploaded files. Thank you for using this service and good luck with the release.
+        </p>
+      </div>
+      
+      <div class="text-center text-gray-600 text-sm mt-8">
+        <p class="mb-2">Questions about uploads?</p>
+        <a href="mailto:contact@freshwax.co.uk" class="text-blue-600 hover:text-blue-700 font-medium">
+          contact@freshwax.co.uk
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // Global state for upload tracking
+  let totalFiles = 0;
+  let uploadedFiles = 0;
+  let currentFileName = '';
+
+  // DOM elements
+  const form = document.getElementById('uploadForm') as HTMLFormElement;
+  const statusMessage = document.getElementById('statusMessage');
+  const submitBtn = document.getElementById('submitBtn') as HTMLButtonElement;
+
+  // Form submission handler
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    console.log('Form submitted');
+
+    // Gather form data
+    const formData = new FormData(form);
+    const data = {
+      artistName: (formData.get('artistName') as string || '').trim(),
+      labelName: (formData.get('labelName') as string || '').trim(),
+      email: (formData.get('email') as string || '').trim(),
+      releaseName: (formData.get('releaseName') as string || '').trim(),
+      trackListing: (formData.get('trackListing') as string || '').trim(),
+      genre: formData.get('genre') as string,
+      customGenre: (formData.get('customGenre') as string || '').trim(),
+      notes: (formData.get('notes') as string || '').trim(),
+      releaseDateType: formData.get('releaseDateType') as string,
+      releaseDate: formData.get('releaseDate') as string || '',
+      vinylRelease: formData.get('vinylRelease') === 'on',
+      vinylPrice: (formData.get('vinylPrice') as string || '').trim(),
+      pricePerSale: (formData.get('pricePerSale') as string || '').trim(),
+    };
+
+    // Validate form data
+    const validationResult = validateFormData(data);
+    if (!validationResult.isValid) {
+      showStatus('error', validationResult.errors.join('. '));
+      return;
+    }
+
+    // Gather files from all sources
+    const files = collectFiles();
+    console.log('Total files collected:', files.length);
+
+    if (files.length === 0) {
+      showStatus('error', 'Please upload at least one file');
+      return;
+    }
+
+    // Start upload process
+    await handleUpload(data, files);
+  });
+
+  /**
+   * Validates form data
+   */
+  function validateFormData(data: any): { isValid: boolean; errors: string[] } {
+    const errors: string[] = [];
+
+    // Required fields
+    if (!data.artistName) errors.push('Artist name is required');
+    if (!data.email) errors.push('Email is required');
+    if (!data.releaseName) errors.push('Release title is required');
+    if (!data.pricePerSale) errors.push('Digital price is required');
+
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (data.email && !emailRegex.test(data.email)) {
+      errors.push('Please enter a valid email address');
+    }
+
+    // Price validation
+    const priceRegex = /^\d+(\.\d{1,2})?$/;
+    if (data.pricePerSale) {
+      if (!priceRegex.test(data.pricePerSale)) {
+        errors.push('Digital price must be a valid number (e.g., 5.99)');
+      } else if (parseFloat(data.pricePerSale) <= 0) {
+        errors.push('Digital price must be greater than 0');
+      }
+    }
+
+    // Vinyl price validation
+    if (data.vinylRelease) {
+      if (!data.vinylPrice) {
+        errors.push('Vinyl price is required when vinyl release is selected');
+      } else if (!priceRegex.test(data.vinylPrice)) {
+        errors.push('Vinyl price must be a valid number (e.g., 15.99)');
+      } else if (parseFloat(data.vinylPrice) <= 0) {
+        errors.push('Vinyl price must be greater than 0');
+      }
+    }
+
+    // Release date validation
+    if (data.releaseDateType === 'specific' && !data.releaseDate) {
+      errors.push('Please select a release date');
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  }
+
+  /**
+   * Collects all files from file inputs and global state
+   */
+  function collectFiles(): File[] {
+    const files: File[] = [];
+    
+    // Get files from file inputs
+    const fileInputs = document.querySelectorAll<HTMLInputElement>('input[type="file"]');
+    fileInputs.forEach(input => {
+      if (input.files && input.files.length > 0) {
+        files.push(...Array.from(input.files));
+      }
+    });
+
+    // Get files from FileUploader component (if stored globally)
+    const fileUploaderFiles = (window as any).uploadedFiles || [];
+    if (Array.isArray(fileUploaderFiles) && fileUploaderFiles.length > 0) {
+      files.push(...fileUploaderFiles);
+    }
+
+    return files;
+  }
+
+  /**
+   * Handles the complete upload process
+   */
+  async function handleUpload(data: any, files: File[]): Promise<void> {
+    // Initialize upload state
+    totalFiles = files.length + 1; // +1 for metadata
+    uploadedFiles = 0;
+
+    // Disable form
+    setFormEnabled(false);
+    submitBtn.textContent = 'Uploading...';
+
+    try {
+      // Generate folder name
+      const timestamp = Date.now();
+      const folderName = `${data.artistName.replace(/[^a-z0-9]/gi, '_')}-${timestamp}`;
+
+      // Show initial progress
+      showProgress();
+
+      // Upload metadata first
+      const submissionFolderId = await uploadMetadata(data, folderName);
+      console.log('Metadata uploaded. Folder ID:', submissionFolderId);
+
+      // Upload each file
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        console.log(`Uploading file ${i + 1}/${files.length}: ${file.name}`);
+        
+        currentFileName = file.name;
+        showProgress();
+        
+        await uploadFile(file, submissionFolderId);
+        
+        uploadedFiles++;
+        currentFileName = '';
+        showProgress();
+      }
+
+      // Success - generate submission reference
+      const submissionRef = `FW-${timestamp.toString().slice(-8)}`;
+      console.log('Upload complete. Reference:', submissionRef);
+      console.log('Redirecting to success page...');
+      
+      // Redirect to success page with data
+      const successUrl = `/success?ref=${encodeURIComponent(submissionRef)}&artist=${encodeURIComponent(data.artistName)}&release=${encodeURIComponent(data.releaseName)}`;
+      window.location.href = successUrl;
+
+    } catch (error) {
+      console.error('Upload error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error details:', errorMessage);
+      showStatus('error', `Upload failed: ${errorMessage}`);
+    } finally {
+      setFormEnabled(true);
+      submitBtn.textContent = 'Submit Release';
+    }
+  }
+
+  /**
+   * Uploads metadata JSON file
+   */
+  async function uploadMetadata(data: any, folderName: string): Promise<string> {
+    const metadata = {
+      ...data,
+      uploadedAt: new Date().toISOString(),
+    };
+
+    const metadataBlob = new Blob(
+      [JSON.stringify(metadata, null, 2)],
+      { type: 'application/json' }
+    );
+    
+    const metadataFile = new File([metadataBlob], 'info.json', {
+      type: 'application/json'
+    });
+
+    const metadataFormData = new FormData();
+    metadataFormData.append('file', metadataFile);
+    metadataFormData.append('folderName', folderName);
+    metadataFormData.append('submissionData', JSON.stringify(data));
+
+    currentFileName = 'info.json';
+    showProgress();
+
+    const response = await fetch('/api/upload-to-r2', {
+      method: 'POST',
+      body: metadataFormData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to create submission folder: ${errorText}`);
+    }
+
+    const result = await response.json();
+    uploadedFiles++;
+    
+    return result.folderId;
+  }
+
+  /**
+   * Uploads a single file
+   */
+  async function uploadFile(file: File, parentFolderId: string): Promise<void> {
+    const fileFormData = new FormData();
+    fileFormData.append('file', file);
+    fileFormData.append('parentFolderId', parentFolderId);
+
+    const response = await fetch('/api/upload-to-r2', {
+      method: 'POST',
+      body: fileFormData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to upload ${file.name}: ${errorText}`);
+    }
+  }
+
+  /**
+   * Enables or disables all form inputs
+   */
+  function setFormEnabled(enabled: boolean): void {
+    const allInputs = form.querySelectorAll('input, textarea, select, button');
+    allInputs.forEach(input => {
+      if (input !== submitBtn || enabled) {
+        (input as HTMLInputElement).disabled = !enabled;
+      }
+    });
+  }
+
+  /**
+   * Shows upload progress
+   */
+  function showProgress(): void {
+    if (!statusMessage) return;
+
+    const percentage = Math.round((uploadedFiles / totalFiles) * 100);
+    
+    statusMessage.className = 'p-4 text-center text-sm bg-blue-50 text-blue-800 border border-blue-200 rounded-lg';
+    statusMessage.innerHTML = `
+      <div class="mb-2 font-semibold">Uploading files... ${uploadedFiles} of ${totalFiles}</div>
+      ${currentFileName ? `<div class="text-xs text-blue-600 mb-2">Currently uploading: ${currentFileName}</div>` : ''}
+      <div class="w-full bg-blue-100 rounded-full h-3 overflow-hidden">
+        <div class="bg-blue-600 h-3 rounded-full transition-all duration-300" style="width: ${percentage}%"></div>
+      </div>
+      <div class="mt-2 text-xs text-blue-600">${percentage}% complete</div>
+      <div class="mt-2 text-xs text-gray-500">Please don't close this page</div>
+    `;
+    statusMessage.classList.remove('hidden');
+  }
+
+  /**
+   * Shows status message
+   */
+  function showStatus(type: 'loading' | 'success' | 'error', message: string): void {
+    if (!statusMessage) return;
+
+    const styles = {
+      loading: 'bg-blue-50 text-blue-800 border border-blue-200 rounded-lg',
+      success: 'bg-green-50 text-green-800 border border-green-200 rounded-lg',
+      error: 'bg-red-50 text-red-800 border border-red-200 rounded-lg',
+    };
+    
+    statusMessage.className = `p-4 text-center text-sm ${styles[type]}`;
+    statusMessage.textContent = message;
+    statusMessage.classList.remove('hidden');
+  }
+  </script>
+</body>
+</html>

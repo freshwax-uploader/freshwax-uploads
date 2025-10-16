@@ -1,0 +1,10 @@
+body {
+  background: #ffffff;
+  min-height: 100vh;
+}
+
+.glass {
+  background: #ffffff;
+  backdrop-filter: blur(10px);
+  border: 1px solid #e5e7eb;
+}

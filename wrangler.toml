@@ -1,0 +1,7 @@
+name = "freshwax-uploader"
+compatibility_date = "2025-01-13"
+
+[[r2_buckets]]
+binding = "MY_BUCKET"
+bucket_name = "your-r2-bucket-name"
+preview_bucket_name = "your-r2-bucket-name"
