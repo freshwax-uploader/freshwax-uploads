@@ -49,7 +49,7 @@ export function formatBytes(bytes: number): string {
 
 interface UploadFileOptions {
   filename: string;
-  buffer: Buffer;
+  buffer: Uint8Array; // Changed from Buffer to Uint8Array
   contentType: string;
   folderPath?: string;
 }
