@@ -1,44 +1,57 @@
 import { S3Client, PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 
-// Configuration
-const R2_ACCOUNT_ID = import.meta.env.R2_ACCOUNT_ID;
-const R2_ACCESS_KEY_ID = import.meta.env.R2_ACCESS_KEY_ID;
-const R2_SECRET_ACCESS_KEY = import.meta.env.R2_SECRET_ACCESS_KEY;
-const R2_BUCKET_NAME = import.meta.env.R2_BUCKET_NAME;
-
 // Storage limits
-const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200MB per file (adjust as needed)
-const MAX_TOTAL_STORAGE = 9.5 * 1024 * 1024 * 1024; // 9.5GB total (safety buffer)
+const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200MB per file
+const MAX_TOTAL_STORAGE = 9.5 * 1024 * 1024 * 1024; // 9.5GB total
 
-// Validate environment variables
-if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME) {
-  throw new Error('Missing R2 environment variables');
+let r2Client: S3Client | null = null;
+let bucketName: string = 'freshwax-uploads';
+
+// Initialize R2 client from Cloudflare binding or env vars
+export function initializeR2(binding: any) {
+  // If binding is already an S3Client (from Cloudflare), use it directly
+  if (binding && typeof binding.send === 'function') {
+    r2Client = binding;
+    return;
+  }
+
+  // Fallback for dev environment - create S3Client manually
+  const accountId = import.meta.env.R2_ACCOUNT_ID;
+  const accessKeyId = import.meta.env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = import.meta.env.R2_SECRET_ACCESS_KEY;
+
+  if (!accountId || !accessKeyId || !secretAccessKey) {
+    throw new Error('Missing R2 credentials in environment variables');
+  }
+
+  r2Client = new S3Client({
+    region: 'auto',
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId,
+      secretAccessKey,
+    },
+  });
 }
-
-// Initialize R2 client
-const r2Client = new S3Client({
-  region: 'auto',
-  endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-  credentials: {
-    accessKeyId: R2_ACCESS_KEY_ID,
-    secretAccessKey: R2_SECRET_ACCESS_KEY,
-  },
-});
 
 // Get total bucket size
 export async function getTotalBucketSize(): Promise<number> {
   try {
+    if (!r2Client) {
+      throw new Error('R2 client not initialized');
+    }
+
     let totalSize = 0;
     let continuationToken: string | undefined;
 
     do {
       const command = new ListObjectsV2Command({
-        Bucket: R2_BUCKET_NAME,
+        Bucket: bucketName,
         ContinuationToken: continuationToken,
       });
 
       const response = await r2Client.send(command);
-      
+
       if (response.Contents) {
         totalSize += response.Contents.reduce((sum, obj) => sum + (obj.Size || 0), 0);
       }
@@ -59,7 +72,7 @@ export function formatBytes(bytes: number): string {
   const k = 1024;
   const sizes = ['Bytes', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
 }
 
 interface UploadFileOptions {
@@ -76,6 +89,10 @@ export async function uploadToR2({
   folderPath = '',
 }: UploadFileOptions) {
   try {
+    if (!r2Client) {
+      throw new Error('R2 client not initialized');
+    }
+
     // Check individual file size
     if (buffer.length > MAX_FILE_SIZE) {
       return {
@@ -88,7 +105,9 @@ export async function uploadToR2({
     const currentSize = await getTotalBucketSize();
     const newTotalSize = currentSize + buffer.length;
 
-    console.log(`Current storage: ${formatBytes(currentSize)} / ${formatBytes(MAX_TOTAL_STORAGE)}`);
+    console.log(
+      `Current storage: ${formatBytes(currentSize)} / ${formatBytes(MAX_TOTAL_STORAGE)}`
+    );
 
     if (newTotalSize > MAX_TOTAL_STORAGE) {
       return {
@@ -102,7 +121,7 @@ export async function uploadToR2({
 
     // Upload to R2
     const command = new PutObjectCommand({
-      Bucket: R2_BUCKET_NAME,
+      Bucket: bucketName,
       Key: key,
       Body: buffer,
       ContentType: contentType,
@@ -112,11 +131,12 @@ export async function uploadToR2({
 
     console.log(`Upload successful: ${key} (${formatBytes(buffer.length)})`);
 
+    const accountId = import.meta.env.R2_ACCOUNT_ID;
     return {
       success: true,
       key: key,
       size: buffer.length,
-      url: `https://${R2_BUCKET_NAME}.${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${key}`,
+      url: `https://${bucketName}.${accountId}.r2.cloudflarestorage.com/${key}`,
     };
   } catch (error) {
     console.error('R2 upload error:', error);

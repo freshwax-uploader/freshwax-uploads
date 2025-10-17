@@ -1,109 +1,94 @@
 import type { APIRoute } from 'astro';
-import { uploadToR2, createFolder } from '../../lib/r2-storage';
+import { uploadToR2, initializeR2 } from '../../lib/r2-storage';
 import { sendAdminNotification, sendArtistConfirmation } from '../../lib/email-service';
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   try {
+    // Get R2 binding from locals or undefined in dev
+    const binding = locals?.runtime?.env?.MY_BUCKET;
+    
+    // Initialize R2 client
+    initializeR2(binding);
+
     const formData = await request.formData();
     const file = formData.get('file') as File;
-    const folderName = formData.get('folderName') as string;
-    const parentFolderName = formData.get('parentFolderId') as string;
-    const submissionData = formData.get('submissionData') as string;
+    const folderName = formData.get('folderName') as string | null;
+    const parentFolderId = formData.get('parentFolderId') as string | null;
+    const submissionData = formData.get('submissionData') as string | null;
 
     if (!file) {
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'No file provided' 
-        }), 
-        { 
-          status: 400,
-          headers: { 'Content-Type': 'application/json' }
-        }
-      );
+      return new Response(JSON.stringify({ error: 'No file provided' }), {
+        status: 400,
+      });
     }
 
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const buffer = Buffer.from(await file.arrayBuffer());
 
-    let uploadFolderPath = parentFolderName || '';
+    // Determine the folder path
+    let folderPath = '';
+    let isFirstUpload = false;
     
-    // If folderName is provided and no parent, create a new folder path
-    if (folderName && !parentFolderName) {
-      const folderResult = await createFolder(folderName);
-      if (folderResult.success) {
-        uploadFolderPath = folderName;
-      }
+    if (parentFolderId) {
+      // If parentFolderId exists, use it (for subsequent file uploads)
+      folderPath = parentFolderId;
+    } else if (folderName) {
+      // If folderName exists, this is the first upload (metadata)
+      folderPath = folderName;
+      isFirstUpload = true;
+    } else if (submissionData) {
+      // Fallback: create folder from submission data
+      const data = JSON.parse(submissionData);
+      const timestamp = Date.now();
+      const sanitizedArtist = data.artistName.replace(/[^a-z0-9]/gi, '_');
+      folderPath = `${sanitizedArtist}-${timestamp}`;
+      isFirstUpload = true;
     }
 
-    // Upload file to R2
     const result = await uploadToR2({
       filename: file.name,
       buffer,
-      contentType: file.type || 'application/octet-stream',
-      folderPath: uploadFolderPath,
+      contentType: file.type,
+      folderPath: folderPath || undefined,
     });
 
     if (!result.success) {
-      return new Response(
-        JSON.stringify(result), 
-        { 
-          status: 500,
-          headers: { 'Content-Type': 'application/json' }
-        }
-      );
+      return new Response(JSON.stringify(result), { status: 400 });
     }
 
-    // If this is the metadata file and we have submission data, send emails
-    if (file.name === 'info.json' && submissionData) {
+    // If this is the first upload (metadata file), send emails
+    if (isFirstUpload && submissionData) {
       try {
-        console.log('📧 Attempting to send emails...');
-        console.log('Submission data:', submissionData);
-        
         const data = JSON.parse(submissionData);
+        const accountId = import.meta.env.R2_ACCOUNT_ID;
+        const folderUrl = `https://${import.meta.env.R2_BUCKET_NAME}.${accountId}.r2.cloudflarestorage.com/${folderPath}`;
         
         // Send both emails
-        const adminResult = await sendAdminNotification(data);
-        console.log('Admin email result:', adminResult);
-        
-        const artistResult = await sendArtistConfirmation(data);
-        console.log('Artist email result:', artistResult);
-        
+        await Promise.all([
+          sendAdminNotification({
+            ...data,
+            folderUrl
+          }),
+          sendArtistConfirmation(data)
+        ]);
+
+        console.log('Confirmation emails sent successfully');
       } catch (emailError) {
-        console.error('❌ Email notification error:', emailError);
+        console.error('Error sending emails:', emailError);
         // Don't fail the upload if emails fail
       }
-    } else {
-      console.log('ℹ️ Skipping emails - file:', file.name, 'hasSubmissionData:', !!submissionData);
     }
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        file: {
-          key: result.key,
-          size: result.size,
-          url: result.url,
-        },
-        folderId: uploadFolderPath,
-      }), 
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    );
+    // Return the folder path as folderId for subsequent uploads
+    return new Response(JSON.stringify({
+      ...result,
+      folderId: folderPath
+    }), { status: 200 });
 
   } catch (error) {
     console.error('Upload error:', error);
     return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Upload failed' 
-      }), 
-      { 
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      }
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Upload failed' }),
+      { status: 500 }
     );
   }
 };
