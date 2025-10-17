@@ -6,32 +6,28 @@ const MAX_TOTAL_STORAGE = 9.5 * 1024 * 1024 * 1024; // 9.5GB total
 
 let r2Client: S3Client | null = null;
 let bucketName: string = 'freshwax-uploads';
+let accountId: string = '';
 
-// Initialize R2 client from Cloudflare binding or env vars
+// Initialize R2 client from Cloudflare binding
 export function initializeR2(binding: any) {
-  // If binding is already an S3Client (from Cloudflare), use it directly
-  if (binding && typeof binding.send === 'function') {
-    r2Client = binding;
-    return;
+  if (!binding) {
+    throw new Error('R2 binding is required');
   }
 
-  // Fallback for dev environment - create S3Client manually
-  const accountId = import.meta.env.R2_ACCOUNT_ID;
-  const accessKeyId = import.meta.env.R2_ACCESS_KEY_ID;
-  const secretAccessKey = import.meta.env.R2_SECRET_ACCESS_KEY;
-
-  if (!accountId || !accessKeyId || !secretAccessKey) {
-    throw new Error('Missing R2 credentials in environment variables');
-  }
-
+  // Cloudflare binding is an R2Bucket object, not an S3Client
+  // We need to create an S3Client using the binding's credentials
   r2Client = new S3Client({
     region: 'auto',
-    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    endpoint: binding.endpoint || `https://${binding.account_id}.r2.cloudflarestorage.com`,
     credentials: {
-      accessKeyId,
-      secretAccessKey,
+      accessKeyId: binding.access_key_id,
+      secretAccessKey: binding.secret_access_key,
     },
   });
+
+  if (binding.account_id) {
+    accountId = binding.account_id;
+  }
 }
 
 // Get total bucket size
@@ -131,7 +127,6 @@ export async function uploadToR2({
 
     console.log(`Upload successful: ${key} (${formatBytes(buffer.length)})`);
 
-    const accountId = import.meta.env.R2_ACCOUNT_ID;
     return {
       success: true,
       key: key,
