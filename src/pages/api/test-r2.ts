@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { initializeR2 } from '../../lib/r2-storage';
+import { initializeR2, uploadToR2 } from '../../lib/r2-storage';
 
 export const GET: APIRoute = async ({ locals }) => {
   const logs: string[] = [];
@@ -11,6 +11,7 @@ export const GET: APIRoute = async ({ locals }) => {
     const env = locals?.runtime?.env;
     
     logs.push(`Binding exists: ${!!binding}`);
+    logs.push(`Binding type: ${typeof binding}`);
     logs.push(`Env exists: ${!!env}`);
     
     if (env) {
@@ -23,9 +24,25 @@ export const GET: APIRoute = async ({ locals }) => {
     initializeR2(binding, env);
     logs.push('R2 initialized successfully!');
     
+    // Test actual upload
+    logs.push('Creating test file...');
+    const testContent = 'This is a test file';
+    const testBuffer = Buffer.from(testContent);
+    
+    logs.push('Attempting to upload test file...');
+    const uploadResult = await uploadToR2({
+      filename: 'test.txt',
+      buffer: testBuffer,
+      contentType: 'text/plain',
+      folderPath: 'test-folder',
+    });
+    
+    logs.push(`Upload result: ${JSON.stringify(uploadResult)}`);
+    
     return new Response(JSON.stringify({ 
-      success: true,
-      logs 
+      success: uploadResult.success,
+      logs,
+      uploadResult
     }, null, 2), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
