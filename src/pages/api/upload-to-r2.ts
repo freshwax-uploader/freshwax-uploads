@@ -4,9 +4,27 @@ import { sendAdminNotification, sendArtistConfirmation } from '../../lib/email-s
 
 export const POST: APIRoute = async ({ request, locals }) => {
   try {
-    // Get R2 binding from locals or undefined in dev
-    const binding = locals?.runtime?.env?.MY_BUCKET;
+    // Get R2 binding from Cloudflare
+    const env = locals.runtime?.env;
     
+    if (!env) {
+      console.error('Runtime environment not available');
+      return new Response(
+        JSON.stringify({ error: 'Runtime environment not configured' }),
+        { status: 500 }
+      );
+    }
+
+    const binding = env.MY_BUCKET;
+    
+    if (!binding) {
+      console.error('MY_BUCKET binding not found. Available bindings:', Object.keys(env));
+      return new Response(
+        JSON.stringify({ error: 'R2 bucket binding not configured' }),
+        { status: 500 }
+      );
+    }
+
     // Initialize R2 client
     initializeR2(binding);
 
@@ -29,14 +47,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
     let isFirstUpload = false;
     
     if (parentFolderId) {
-      // If parentFolderId exists, use it (for subsequent file uploads)
       folderPath = parentFolderId;
     } else if (folderName) {
-      // If folderName exists, this is the first upload (metadata)
       folderPath = folderName;
       isFirstUpload = true;
     } else if (submissionData) {
-      // Fallback: create folder from submission data
       const data = JSON.parse(submissionData);
       const timestamp = Date.now();
       const sanitizedArtist = data.artistName.replace(/[^a-z0-9]/gi, '_');
@@ -59,10 +74,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
     if (isFirstUpload && submissionData) {
       try {
         const data = JSON.parse(submissionData);
-        const accountId = import.meta.env.R2_ACCOUNT_ID;
-        const folderUrl = `https://${import.meta.env.R2_BUCKET_NAME}.${accountId}.r2.cloudflarestorage.com/${folderPath}`;
+        // Get account ID from binding if available
+        const accountId = binding.account_id || env.R2_ACCOUNT_ID || 'unknown';
+        const bucketName = 'freshwax-uploads';
+        const folderUrl = `https://${bucketName}.${accountId}.r2.cloudflarestorage.com/${folderPath}`;
         
-        // Send both emails
         await Promise.all([
           sendAdminNotification({
             ...data,
@@ -74,11 +90,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
         console.log('Confirmation emails sent successfully');
       } catch (emailError) {
         console.error('Error sending emails:', emailError);
-        // Don't fail the upload if emails fail
       }
     }
 
-    // Return the folder path as folderId for subsequent uploads
     return new Response(JSON.stringify({
       ...result,
       folderId: folderPath
@@ -86,6 +100,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   } catch (error) {
     console.error('Upload error:', error);
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : 'Upload failed' }),
       { status: 500 }
