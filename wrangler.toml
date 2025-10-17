@@ -1,12 +1,7 @@
 name = "freshwax-uploader"
 compatibility_date = "2025-01-13"
 
-[[kv_namespaces]]
-binding = "SESSION"
-id = "your-actual-kv-id"
-preview_id = "your-actual-preview-kv-id"
-
 [[r2_buckets]]
-binding = "MY_BUCKET"
+binding = "freshwax-uploads"
 bucket_name = "freshwax-uploads"
 preview_bucket_name = "freshwax-uploads"

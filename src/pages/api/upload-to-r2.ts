@@ -15,10 +15,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
     }
 
-    const binding = env.MY_BUCKET;
+    const binding = env.freshwax_uploads;
     
     if (!binding) {
-      console.error('MY_BUCKET binding not found. Available bindings:', Object.keys(env));
+      console.error('freshwax_uploads binding not found. Available bindings:', Object.keys(env));
       return new Response(
         JSON.stringify({ error: 'R2 bucket binding not configured' }),
         { status: 500 }
