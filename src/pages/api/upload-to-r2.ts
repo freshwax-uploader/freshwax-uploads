@@ -26,6 +26,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     // Initialize R2 client
+    console.log('Binding type:', typeof binding);
+    console.log('Binding methods:', binding ? Object.getOwnPropertyNames(Object.getPrototypeOf(binding)) : 'null');
     initializeR2(binding);
 
     const formData = await request.formData();
